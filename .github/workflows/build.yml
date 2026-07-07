@@ -1,0 +1,558 @@
+name: Build Aris AI APK
+
+# Yeh EK hi file hai. Ise apne GitHub repo mein is exact path par rakhein:
+#   .github/workflows/build.yml
+# Aur repo mein kahin aur koi file/folder banane ki zaroorat NAHI hai.
+# Yeh workflow khud hi poora Android project (Kotlin, XML, Gradle) generate karta hai
+# aur usse build karke APK deta hai.
+#
+# ZAROORI SETUP (ek baar karna hai, GitHub par):
+# 1. Apne naye Groq API key (jo aapne pehle wali revoke karke banayi) ko
+#    repo Settings -> Secrets and variables -> Actions -> New repository secret
+#    mein daalein, naam bilkul yeh rakhein:  GROQ_API_KEY
+# 2. Is file ko commit/push karte hi ya Actions tab se "Run workflow" dabate hi
+#    build shuru ho jayega.
+# 3. Build khatam hone par, Actions run ke "Summary" page ke "Artifacts" section
+#    mein "aris-ai-apk" milega - usse download karke phone mein install karein
+#    (Settings > install unknown apps ki permission deni hogi).
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Download Gradle
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle-8.7-bin.zip
+          echo "$PWD/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Android project files (Aris AI)
+        run: |
+          set -e
+          mkdir -p app/src/main/java/com/aris/ai
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+
+          # ---------- settings.gradle ----------
+          cat > settings.gradle <<'EOF1'
+          rootProject.name = "ArisAI"
+          include ':app'
+          EOF1
+
+          # ---------- root build.gradle ----------
+          cat > build.gradle <<'EOF2'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.3.2'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF2
+
+          # ---------- gradle.properties ----------
+          cat > gradle.properties <<'EOF3'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m
+          EOF3
+
+          # ---------- app/build.gradle ----------
+          cat > app/build.gradle <<'EOF4'
+          apply plugin: 'com.android.application'
+          apply plugin: 'kotlin-android'
+
+          android {
+              namespace 'com.aris.ai'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.aris.ai"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+                  buildConfigField "String", "GROQ_API_KEY", "\"${project.findProperty('GROQ_API_KEY') ?: ""}\""
+              }
+
+              buildFeatures {
+                  buildConfig true
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
+              buildTypes {
+                  debug {
+                      minifyEnabled false
+                  }
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+          }
+          EOF4
+
+          # ---------- AndroidManifest.xml ----------
+          cat > app/src/main/AndroidManifest.xml <<'EOF5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+                  tools:ignore="QueryAllPackagesPermission" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF5
+
+          # ---------- App icon (custom, adaptive) ----------
+          cat > app/src/main/res/drawable/ic_launcher_background.xml <<'EOF9'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="#1565C0" />
+          </shape>
+          EOF9
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF10'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M54,22 C47.4,22 42,27.4 42,34 L42,54 C42,60.6 47.4,66 54,66 C60.6,66 66,60.6 66,54 L66,34 C66,27.4 60.6,22 54,22 Z" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M34,52 L38,52 C38,63.6 45.4,73 54,73 C62.6,73 70,63.6 70,52 L74,52 C74,65 65.5,75.8 55.8,76.9 L55.8,86 L60,86 L60,90 L48,90 L48,86 L52.2,86 L52.2,76.9 C42.5,75.8 34,65 34,52 Z" />
+          </vector>
+          EOF10
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF11'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF11
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml <<'EOF12'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF12
+
+          # ---------- strings.xml ----------
+          cat > app/src/main/res/values/strings.xml <<'EOF6'
+          <resources>
+              <string name="app_name">Aris AI</string>
+          </resources>
+          EOF6
+
+          # ---------- activity_main.xml ----------
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="16dp">
+
+              <Button
+                  android:id="@+id/micButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Aris Ko Shuru Karein" />
+
+              <ImageView
+                  android:id="@+id/imageView"
+                  android:layout_width="match_parent"
+                  android:layout_height="200dp"
+                  android:layout_marginTop="12dp"
+                  android:scaleType="fitCenter" />
+
+              <ScrollView
+                  android:id="@+id/scrollView"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:layout_marginTop="12dp">
+
+                  <TextView
+                      android:id="@+id/logView"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textSize="14sp"
+                      android:text="Aris tayar hai. Bolne ke liye 'Aris' bolein, phir apna command boliye.\n\nExamples:\n- Aris, YouTube par ek gana play karo\n- Aris, WhatsApp khol do\n- Aris, mujhe ek photo bana do sunset ki\n- Aris, mujhe research karke batao ki AI kya hai" />
+              </ScrollView>
+          </LinearLayout>
+          EOF7
+
+          # ---------- MainActivity.kt ----------
+          cat > app/src/main/java/com/aris/ai/MainActivity.kt <<'EOF8'
+          package com.aris.ai
+
+          import android.Manifest
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.net.Uri
+          import android.os.Bundle
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.util.Log
+          import android.widget.Button
+          import android.widget.ImageView
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import androidx.core.content.ContextCompat
+          import java.io.File
+          import java.io.FileOutputStream
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.net.URLEncoder
+          import org.json.JSONArray
+          import org.json.JSONObject
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var speechRecognizer: SpeechRecognizer
+              private lateinit var logView: TextView
+              private lateinit var scrollView: ScrollView
+              private lateinit var imageView: ImageView
+              private lateinit var micButton: Button
+              private var listening = false
+              private var awaitingCommand = false
+
+              private val GROQ_KEY = BuildConfig.GROQ_API_KEY
+              private val CHAT_MODEL = "llama-3.3-70b-versatile"
+              private val RESEARCH_MODEL = "compound-beta"
+              private val TTS_MODEL = "playai-tts"
+              private val TTS_VOICE = "Fritz-PlayAI"
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  logView = findViewById(R.id.logView)
+                  scrollView = findViewById(R.id.scrollView)
+                  imageView = findViewById(R.id.imageView)
+                  micButton = findViewById(R.id.micButton)
+
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                      != PackageManager.PERMISSION_GRANTED) {
+                      ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                  }
+
+                  speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+                  speechRecognizer.setRecognitionListener(recognitionListener)
+
+                  micButton.setOnClickListener {
+                      if (!listening) {
+                          listening = true
+                          micButton.text = "Aris Sun Raha Hai... (Rokne ke liye tap karein)"
+                          startListening()
+                      } else {
+                          listening = false
+                          micButton.text = "Aris Ko Shuru Karein"
+                          speechRecognizer.stopListening()
+                      }
+                  }
+              }
+
+              private fun startListening() {
+                  val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                      putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                      putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+                      putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                  }
+                  try {
+                      speechRecognizer.startListening(intent)
+                  } catch (e: Exception) {
+                      log("Mic error: ${e.message}")
+                  }
+              }
+
+              private val recognitionListener = object : RecognitionListener {
+                  override fun onResults(results: Bundle?) {
+                      val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                      val text = matches?.firstOrNull()?.trim() ?: ""
+                      if (text.isNotEmpty()) handleRecognizedText(text)
+                      if (listening) startListening()
+                  }
+                  override fun onError(error: Int) {
+                      if (listening) startListening()
+                  }
+                  override fun onReadyForSpeech(params: Bundle?) {}
+                  override fun onBeginningOfSpeech() {}
+                  override fun onRmsChanged(rmsdB: Float) {}
+                  override fun onBufferReceived(buffer: ByteArray?) {}
+                  override fun onEndOfSpeech() {}
+                  override fun onPartialResults(partialResults: Bundle?) {}
+                  override fun onEvent(eventType: Int, params: Bundle?) {}
+              }
+
+              private fun handleRecognizedText(text: String) {
+                  log("Suna: $text")
+                  val lower = text.lowercase()
+
+                  if (!awaitingCommand) {
+                      if (lower.contains("aris") || lower.contains("aaris") || lower.contains("arise")) {
+                          awaitingCommand = true
+                          val afterWake = lower.substringAfter("aris").trim()
+                          if (afterWake.isNotEmpty()) {
+                              routeCommand(afterWake)
+                              awaitingCommand = false
+                          } else {
+                              speak("Ji bataiye")
+                          }
+                      }
+                  } else {
+                      routeCommand(lower)
+                      awaitingCommand = false
+                  }
+              }
+
+              private fun routeCommand(command: String) {
+                  Thread {
+                      try {
+                          when {
+                              command.contains("khol") || command.contains("open") -> openApp(command)
+                              command.contains("youtube") && (command.contains("gana") || command.contains("song") || command.contains("play")) -> playOnYouTube(command)
+                              command.contains("image") || command.contains("photo") || command.contains("tasveer") -> generateImage(command)
+                              command.contains("research") || command.contains("khoj") -> deepResearch(command)
+                              else -> chatAndSpeak(command)
+                          }
+                      } catch (e: Exception) {
+                          log("Error: ${e.message}")
+                      }
+                  }.start()
+              }
+
+              private fun openApp(command: String) {
+                  val pm = packageManager
+                  val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                  val target = apps.firstOrNull { app ->
+                      val label = pm.getApplicationLabel(app).toString().lowercase()
+                      command.contains(label)
+                  }
+                  runOnUiThread {
+                      if (target != null) {
+                          val launchIntent = pm.getLaunchIntentForPackage(target.packageName)
+                          if (launchIntent != null) {
+                              startActivity(launchIntent)
+                              log("Khol raha hoon: ${pm.getApplicationLabel(target)}")
+                              speak("Khol raha hoon")
+                              return@runOnUiThread
+                          }
+                      }
+                      log("App nahi mila")
+                      speak("Yeh app nahi mila")
+                  }
+              }
+
+              private fun playOnYouTube(command: String) {
+                  val query = command
+                      .replace("youtube", "")
+                      .replace("gana", "")
+                      .replace("song", "")
+                      .replace("play", "")
+                      .replace("khol", "")
+                      .trim()
+                  val uri = Uri.parse("https://www.youtube.com/results?search_query=" + URLEncoder.encode(query, "UTF-8"))
+                  val intent = Intent(Intent.ACTION_VIEW, uri)
+                  intent.setPackage("com.google.android.youtube")
+                  runOnUiThread {
+                      try {
+                          startActivity(intent)
+                      } catch (e: Exception) {
+                          startActivity(Intent(Intent.ACTION_VIEW, uri))
+                      }
+                      speak("YouTube par khol raha hoon")
+                  }
+              }
+
+              private fun generateImage(command: String) {
+                  val prompt = command.replace("image", "").replace("photo", "").replace("tasveer", "").replace("bana", "").trim()
+                  val encoded = URLEncoder.encode(prompt.ifBlank { "art" }, "UTF-8")
+                  val url = URL("https://image.pollinations.ai/prompt/$encoded")
+                  val conn = url.openConnection() as HttpURLConnection
+                  conn.connectTimeout = 20000
+                  conn.readTimeout = 20000
+                  val bytes = conn.inputStream.readBytes()
+                  val file = File(cacheDir, "generated.jpg")
+                  FileOutputStream(file).use { it.write(bytes) }
+                  runOnUiThread {
+                      imageView.setImageURI(Uri.fromFile(file))
+                      log("Image ban gayi")
+                      speak("Image tayar hai")
+                  }
+              }
+
+              private fun chatAndSpeak(command: String) {
+                  val reply = groqChat(command, CHAT_MODEL)
+                  runOnUiThread { log("Aris: $reply") }
+                  speak(reply)
+              }
+
+              private fun deepResearch(command: String) {
+                  val reply = groqChat(command, RESEARCH_MODEL)
+                  runOnUiThread { log("Research: $reply") }
+                  speak(reply)
+              }
+
+              private fun groqChat(userText: String, model: String): String {
+                  return try {
+                      val url = URL("https://api.groq.com/openai/v1/chat/completions")
+                      val conn = url.openConnection() as HttpURLConnection
+                      conn.requestMethod = "POST"
+                      conn.setRequestProperty("Authorization", "Bearer $GROQ_KEY")
+                      conn.setRequestProperty("Content-Type", "application/json")
+                      conn.doOutput = true
+                      val messages = JSONArray()
+                      val sys = JSONObject().put("role", "system").put("content", "Tum Aris ho, ek smart Hindi-English bolne wala AI assistant. Chhote, saaf jawab do.")
+                      val user = JSONObject().put("role", "user").put("content", userText)
+                      messages.put(sys).put(user)
+                      val body = JSONObject().put("model", model).put("messages", messages)
+                      conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                      val response = conn.inputStream.bufferedReader().readText()
+                      val json = JSONObject(response)
+                      json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+                  } catch (e: Exception) {
+                      "Maaf kijiye, jawab nahi mil saka: ${e.message}"
+                  }
+              }
+
+              private fun speak(text: String) {
+                  Thread {
+                      try {
+                          val url = URL("https://api.groq.com/openai/v1/audio/speech")
+                          val conn = url.openConnection() as HttpURLConnection
+                          conn.requestMethod = "POST"
+                          conn.setRequestProperty("Authorization", "Bearer $GROQ_KEY")
+                          conn.setRequestProperty("Content-Type", "application/json")
+                          conn.doOutput = true
+                          val body = JSONObject()
+                              .put("model", TTS_MODEL)
+                              .put("input", text)
+                              .put("voice", TTS_VOICE)
+                              .put("response_format", "wav")
+                          conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                          val audioBytes = conn.inputStream.readBytes()
+                          val file = File(cacheDir, "speech.wav")
+                          FileOutputStream(file).use { it.write(audioBytes) }
+                          runOnUiThread {
+                              val mp = MediaPlayer()
+                              mp.setAudioAttributes(
+                                  AudioAttributes.Builder()
+                                      .setUsage(AudioAttributes.USAGE_MEDIA)
+                                      .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                      .build()
+                              )
+                              mp.setDataSource(file.absolutePath)
+                              mp.setOnCompletionListener { it.release() }
+                              mp.prepare()
+                              mp.start()
+                          }
+                      } catch (e: Exception) {
+                          Log.e("Aris", "TTS error: ${e.message}")
+                      }
+                  }.start()
+              }
+
+              private fun log(msg: String) {
+                  runOnUiThread {
+                      logView.append("\n$msg")
+                      scrollView.post { scrollView.fullScroll(android.view.View.FOCUS_DOWN) }
+                  }
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  speechRecognizer.destroy()
+              }
+          }
+          EOF8
+
+      - name: Build debug APK
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          gradle assembleDebug -PGROQ_API_KEY="$GROQ_API_KEY" --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aris-ai-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
