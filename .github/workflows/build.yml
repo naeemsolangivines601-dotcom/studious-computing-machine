@@ -208,6 +208,19 @@ jobs:
           </adaptive-icon>
           EOF12
 
+          cat > app/src/main/res/drawable/orb_button.xml <<'EOF13'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="oval">
+              <gradient
+                  android:type="radial"
+                  android:gradientRadius="140"
+                  android:centerColor="#C9B6FF"
+                  android:startColor="#D6C5FF"
+                  android:endColor="#4C1D95" />
+          </shape>
+          EOF13
+
           # ---------- strings.xml ----------
           cat > app/src/main/res/values/strings.xml <<'EOF6'
           <resources>
@@ -222,34 +235,77 @@ jobs:
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical"
-              android:padding="16dp">
+              android:background="#0D0B1E"
+              android:padding="24dp">
 
-              <Button
-                  android:id="@+id/micButton"
+              <TextView
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:text="Aris Ko Shuru Karein" />
+                  android:layout_marginTop="16dp"
+                  android:text="Hello, I am Aris"
+                  android:textColor="#FFFFFF"
+                  android:textSize="28sp"
+                  android:textStyle="bold"
+                  android:gravity="center" />
 
-              <ImageView
-                  android:id="@+id/imageView"
+              <TextView
                   android:layout_width="match_parent"
-                  android:layout_height="200dp"
-                  android:layout_marginTop="12dp"
-                  android:scaleType="fitCenter" />
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="6dp"
+                  android:text="Aapka smart AI assistant. Tap karke boliye."
+                  android:textColor="#9A94C4"
+                  android:textSize="14sp"
+                  android:gravity="center" />
 
-              <ScrollView
-                  android:id="@+id/scrollView"
+              <FrameLayout
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
                   android:layout_weight="1"
                   android:layout_marginTop="12dp">
 
+                  <Button
+                      android:id="@+id/micButton"
+                      android:layout_width="180dp"
+                      android:layout_height="180dp"
+                      android:layout_gravity="center"
+                      android:background="@drawable/orb_button"
+                      android:text="🎤"
+                      android:textSize="46sp"
+                      android:elevation="10dp"
+                      android:stateListAnimator="@null" />
+              </FrameLayout>
+
+              <TextView
+                  android:id="@+id/statusText"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Tap karke Aris se baat karein"
+                  android:textColor="#B8B0E8"
+                  android:textSize="14sp"
+                  android:gravity="center"
+                  android:layout_marginBottom="14dp" />
+
+              <ImageView
+                  android:id="@+id/imageView"
+                  android:layout_width="match_parent"
+                  android:layout_height="150dp"
+                  android:scaleType="fitCenter"
+                  android:layout_marginBottom="10dp" />
+
+              <ScrollView
+                  android:id="@+id/scrollView"
+                  android:layout_width="match_parent"
+                  android:layout_height="150dp"
+                  android:background="#161328"
+                  android:padding="10dp">
+
                   <TextView
                       android:id="@+id/logView"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:textSize="14sp"
-                      android:text="Aris tayar hai. Bolne ke liye 'Aris' bolein, phir apna command boliye.\n\nExamples:\n- Aris, YouTube par ek gana play karo\n- Aris, WhatsApp khol do\n- Aris, mujhe ek photo bana do sunset ki\n- Aris, mujhe research karke batao ki AI kya hai" />
+                      android:textColor="#D6D2F0"
+                      android:textSize="13sp"
+                      android:text="Aris tayar hai. 'Aris' bolein, phir apna command boliye.\n\nExamples:\n- Aris, YouTube par ek gana play karo\n- Aris, WhatsApp khol do\n- Aris, mujhe ek photo bana do sunset ki\n- Aris, research karke batao AI kya hai" />
               </ScrollView>
           </LinearLayout>
           EOF7
@@ -258,6 +314,8 @@ jobs:
           cat > app/src/main/java/com/aris/ai/MainActivity.kt <<'EOF8'
           package com.aris.ai
 
+          import android.animation.ObjectAnimator
+          import android.animation.ValueAnimator
           import android.Manifest
           import android.content.Intent
           import android.content.pm.PackageManager
@@ -291,6 +349,9 @@ jobs:
               private lateinit var scrollView: ScrollView
               private lateinit var imageView: ImageView
               private lateinit var micButton: Button
+              private lateinit var statusText: TextView
+              private var pulseX: ObjectAnimator? = null
+              private var pulseY: ObjectAnimator? = null
               private var listening = false
               private var awaitingCommand = false
 
@@ -308,6 +369,7 @@ jobs:
                   scrollView = findViewById(R.id.scrollView)
                   imageView = findViewById(R.id.imageView)
                   micButton = findViewById(R.id.micButton)
+                  statusText = findViewById(R.id.statusText)
 
                   if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                       != PackageManager.PERMISSION_GRANTED) {
@@ -320,14 +382,38 @@ jobs:
                   micButton.setOnClickListener {
                       if (!listening) {
                           listening = true
-                          micButton.text = "Aris Sun Raha Hai... (Rokne ke liye tap karein)"
+                          statusText.text = "Aris sun raha hai..."
+                          startPulse()
                           startListening()
                       } else {
                           listening = false
-                          micButton.text = "Aris Ko Shuru Karein"
+                          statusText.text = "Tap karke Aris se baat karein"
+                          stopPulse()
                           speechRecognizer.stopListening()
                       }
                   }
+              }
+
+              private fun startPulse() {
+                  pulseX?.cancel()
+                  pulseY?.cancel()
+                  pulseX = ObjectAnimator.ofFloat(micButton, "scaleX", 1f, 1.08f, 1f).apply {
+                      duration = 900
+                      repeatCount = ValueAnimator.INFINITE
+                      start()
+                  }
+                  pulseY = ObjectAnimator.ofFloat(micButton, "scaleY", 1f, 1.08f, 1f).apply {
+                      duration = 900
+                      repeatCount = ValueAnimator.INFINITE
+                      start()
+                  }
+              }
+
+              private fun stopPulse() {
+                  pulseX?.cancel()
+                  pulseY?.cancel()
+                  micButton.scaleX = 1f
+                  micButton.scaleY = 1f
               }
 
               private fun startListening() {
@@ -390,7 +476,7 @@ jobs:
                               command.contains("khol") || command.contains("open") -> openApp(command)
                               command.contains("youtube") && (command.contains("gana") || command.contains("song") || command.contains("play")) -> playOnYouTube(command)
                               command.contains("image") || command.contains("photo") || command.contains("tasveer") -> generateImage(command)
-                              command.contains("research") || command.contains("khoj") -> deepResearch(command)
+              command.contains("research") || command.contains("khoj") -> deepResearch(command)
                               else -> chatAndSpeak(command)
                           }
                       } catch (e: Exception) {
@@ -460,12 +546,14 @@ jobs:
               }
 
               private fun chatAndSpeak(command: String) {
+                  runOnUiThread { statusText.text = "Aris soch raha hai..." }
                   val reply = groqChat(command, CHAT_MODEL)
                   runOnUiThread { log("Aris: $reply") }
                   speak(reply)
               }
 
               private fun deepResearch(command: String) {
+                  runOnUiThread { statusText.text = "Aris research kar raha hai..." }
                   val reply = groqChat(command, RESEARCH_MODEL)
                   runOnUiThread { log("Research: $reply") }
                   speak(reply)
@@ -512,6 +600,7 @@ jobs:
                           val file = File(cacheDir, "speech.wav")
                           FileOutputStream(file).use { it.write(audioBytes) }
                           runOnUiThread {
+                              statusText.text = "Aris bol raha hai..."
                               val mp = MediaPlayer()
                               mp.setAudioAttributes(
                                   AudioAttributes.Builder()
@@ -520,7 +609,10 @@ jobs:
                                       .build()
                               )
                               mp.setDataSource(file.absolutePath)
-                              mp.setOnCompletionListener { it.release() }
+                              mp.setOnCompletionListener {
+                                  it.release()
+                                  statusText.text = if (listening) "Aris sun raha hai..." else "Tap karke Aris se baat karein"
+                              }
                               mp.prepare()
                               mp.start()
                           }
@@ -555,4 +647,3 @@ jobs:
         with:
           name: aris-ai-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-          
